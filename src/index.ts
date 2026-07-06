@@ -1,27 +1,46 @@
 import { Command } from 'commander';
-import { initRakibox, stageFiles, pushRakibox } from './commands/rakiboxActions.js';
+import { initRakibox, addFiles, commit, setBranch, addRemote, pushRakibox } from './commands/rakiboxActions.js';
 
 const program = new Command();
 
 program
   .name('rakibox')
-  .description('Custom decentralized cloud tracking file tool system')
-  .version('2.0.0');
+  .description('Rakibox - Custom version control system using Firestore and R2')
+  .version('1.0.0');
 
 program
   .command('init')
-  .description('Initialize a cloud tracked Rakibox profile architecture')
+  .description('Initialize Rakibox workspace')
   .action(async () => await initRakibox());
 
 program
   .command('add')
-  .description('Stage internal system directories into standard tracking configurations')
-  .action(() => stageFiles());
+  .description('Stage files')
+  .argument('[paths]', 'Files or directories to stage', '.')
+  .action((paths) => addFiles(paths));
+
+program
+  .command('commit')
+  .description('Commit staged changes')
+  .requiredOption('-m, --message <message>', 'Commit message')
+  .action((options) => commit(options.message));
+
+program
+  .command('branch')
+  .description('Set branch name')
+  .argument('<name>', 'Branch name')
+  .action((name) => setBranch(name));
+
+program
+  .command('remote')
+  .description('Add remote URL')
+  .argument('url', 'Remote repository URL')
+  .action((url) => addRemote(url));
 
 program
   .command('push')
-  .description('Upload staged components cleanly across Cloudflare R2 and state file schemas inside Firestore')
-  .argument('[message]', 'Commit payload reference tag summary information', 'Cloud publish checkpoint update')
+  .description('Push changes to Rakibox Cloud')
+  .argument('[message]', 'Commit message', 'Cloud publish checkpoint update')
   .action(async (message) => await pushRakibox(message));
 
 program.parse(process.argv);

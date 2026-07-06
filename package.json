@@ -1,7 +1,7 @@
 {
   "name": "rakibox",
   "version": "1.0.0",
-  "description": "A minimalist Git wrapper tool",
+  "description": "Custom version control system using Firestore and Cloudflare R2",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
@@ -12,9 +12,11 @@
     "dev": "tsup --watch"
   },
   "keywords": [
-    "git",
+    "rakibox",
     "cli",
-    "rakibox"
+    "version-control",
+    "firestore",
+    "cloudflare-r2"
   ],
   "author": "",
   "license": "MIT",

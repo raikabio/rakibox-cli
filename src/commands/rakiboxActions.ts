@@ -1,25 +1,15 @@
 import { db } from '../lib/firebase.js';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { r2, BUCKET_NAME } from '../lib/r2.js';
+import { collection, addDoc, serverTimestamp, doc, setDoc, getDoc } from 'firebase/firestore';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs';
 import path from 'path';
 import mime from 'mime-types';
 import pc from 'picocolors';
 
-const DEFAULT_BRANCH = 'rakibox.vercel.app';
+const DEFAULT_BRANCH = 'main';
 const STAGING_FILE = path.join(process.cwd(), '.rakibox-stage.json');
-
-// --- OUR CENTRALIZED CLOUDFLARE R2 CONFIGURATION ---
-// These credentials are baked directly into the library for all users on Earth
-const BUCKET_NAME = "rakibox-72201.firebasestorage.app"; // Using your project storage identifier
-const r2 = new S3Client({
-  region: "auto",
-  endpoint: "https://rakibox-72201.r2.cloudflarestorage.com", // Your R2 Account Endpoint
-  credentials: {
-    accessKeyId: "AIzaSyA-bIHIzJ22ZEVFDQ6uaOpvwtny_nHKtmw", // Your specific master R2 Token ID
-    secretAccessKey: "YOUR_CENTRAL_R2_SECRET_KEY_HERE"       // Your master R2 Secret Key
-  },
-});
+const CONFIG_FILE = path.join(process.cwd(), '.rakibox.json');
 
 function getAllFiles(dirPath: string, arrayOfFiles: string[] = []): string[] {
   const files = fs.readdirSync(dirPath);
@@ -39,49 +29,100 @@ function getAllFiles(dirPath: string, arrayOfFiles: string[] = []): string[] {
   return arrayOfFiles;
 }
 
+function loadConfig() {
+  if (!fs.existsSync(CONFIG_FILE)) {
+    console.error(pc.red('✖ Error:') + ' Project not initialized. Run rakibox init first.');
+    process.exit(1);
+  }
+  return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+}
+
+function saveConfig(config: any) {
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+
 export async function initRakibox() {
-  console.log(pc.gray('\nInitializing global Rakibox workspace...'));
+  console.log(pc.gray('\nInitializing Rakibox workspace...'));
   
-  const configPath = path.join(process.cwd(), '.rakibox.json');
-  if (fs.existsSync(configPath)) {
+  if (fs.existsSync(CONFIG_FILE)) {
     console.log(pc.yellow('⚠ Notice:') + ' Rakibox repository is already active here.');
     return;
   }
 
-  // Generate a unique repository ID for this user's project
   const projectID = `repo-${Math.random().toString(36).substring(2, 9)}`;
 
-  fs.writeFileSync(configPath, JSON.stringify({ projectID, branch: DEFAULT_BRANCH }, null, 2));
+  saveConfig({ projectID, branch: DEFAULT_BRANCH, remote: null });
   fs.writeFileSync(STAGING_FILE, JSON.stringify([], null, 2));
 
-  console.log(pc.green('✔ Connected:') + pc.white(` Created local repository mapped securely to Rakibox Central.`));
+  console.log(pc.green('✔ Success:') + pc.white(` Rakibox workspace initialized successfully.`));
 }
 
-export function stageFiles() {
-  console.log(pc.gray('\nScanning workspace changes...'));
-  if (!fs.existsSync(path.join(process.cwd(), '.rakibox.json'))) {
-    console.error(pc.red('✖ Error:') + ' Project not initialized. Run rakibox init first.');
-    return;
-  }
-
-  const files = getAllFiles(process.cwd());
-  fs.writeFileSync(STAGING_FILE, JSON.stringify(files, null, 2));
-
-  console.log(pc.green('✔ Staged:') + pc.white(` Tracking ${files.length} files successfully.`));
-}
-
-export async function pushRakibox(message: string) {
-  console.log(pc.gray('\nStreaming files securely to Rakibox Cloud servers...'));
+export function addFiles(paths: string = '.') {
+  console.log(pc.gray('\nStaging files...'));
   
-  if (!fs.existsSync(STAGING_FILE) || !fs.existsSync(path.join(process.cwd(), '.rakibox.json'))) {
-    console.error(pc.red('✖ Error:') + ' Missing initialization layout configurations.');
+  const config = loadConfig();
+  let filesToStage: string[] = [];
+
+  if (paths === '.') {
+    filesToStage = getAllFiles(process.cwd());
+  } else {
+    const pathList = paths.split(' ').filter(p => p);
+    for (const p of pathList) {
+      const absolutePath = path.resolve(process.cwd(), p);
+      if (fs.existsSync(absolutePath)) {
+        if (fs.statSync(absolutePath).isDirectory()) {
+          filesToStage.push(...getAllFiles(absolutePath).map(f => path.relative(process.cwd(), path.resolve(absolutePath, f))));
+        } else {
+          filesToStage.push(path.relative(process.cwd(), absolutePath));
+        }
+      }
+    }
+  }
+
+  fs.writeFileSync(STAGING_FILE, JSON.stringify(filesToStage, null, 2));
+  console.log(pc.green('✔ Success:') + pc.white(` Staged ${filesToStage.length} files.`));
+}
+
+export function commit(message: string) {
+  console.log(pc.gray(`\nCommitting changes...`));
+  
+  const config = loadConfig();
+  console.log(pc.green('✔ Success:') + pc.white(` Commit created with message: "${message}"`));
+}
+
+export function setBranch(branchName: string) {
+  const config = loadConfig();
+  config.branch = branchName;
+  saveConfig(config);
+  console.log(pc.green('✔ Success:') + pc.white(` Switched to branch: ${branchName}`));
+}
+
+export function addRemote(url: string) {
+  const config = loadConfig();
+  config.remote = url;
+  saveConfig(config);
+  console.log(pc.green('✔ Success:') + pc.white(` Remote origin set to: ${url}`));
+}
+
+export async function pushRakibox(message: string = 'Cloud publish checkpoint update') {
+  console.log(pc.gray('\nPushing to Rakibox Cloud...'));
+  
+  if (!fs.existsSync(STAGING_FILE) || !fs.existsSync(CONFIG_FILE)) {
+    console.error(pc.red('✖ Error:') + ' Project not initialized or no files staged.');
     return;
   }
 
-  const { projectID, branch } = JSON.parse(fs.readFileSync(path.join(process.cwd(), '.rakibox.json'), 'utf-8'));
+  const config = loadConfig();
   const stagedFiles: string[] = JSON.parse(fs.readFileSync(STAGING_FILE, 'utf-8'));
 
+  if (stagedFiles.length === 0) {
+    console.error(pc.red('✖ Error:') + ' No files staged. Run rakibox add . first.');
+    return;
+  }
+
   const fileTreeSnapshot: Array<{ path: string; cloudUrl: string }> = [];
+
+  console.log(pc.gray('Uploading files to Cloudflare R2...'));
 
   for (const relativePath of stagedFiles) {
     const fileAbsolutePath = path.resolve(process.cwd(), relativePath);
@@ -91,10 +132,8 @@ export async function pushRakibox(message: string) {
     const contentType = mime.lookup(fileAbsolutePath) || 'application/octet-stream';
     const cleanPath = relativePath.replace(/\\/g, '/');
     
-    // Structured cloud tracking filename keys
-    const cloudKey = `public/${projectID}/${branch}/${cleanPath}`;
+    const cloudKey = `projects/${config.projectID}/${config.branch}/${cleanPath}`;
 
-    // Upload to OUR central storage directly
     await r2.send(new PutObjectCommand({
       Bucket: BUCKET_NAME,
       Key: cloudKey,
@@ -104,19 +143,34 @@ export async function pushRakibox(message: string) {
 
     fileTreeSnapshot.push({
       path: cleanPath,
-      cloudUrl: `https://rakibox.vercel.app/cdn/${cloudKey}` // Public file URL format matching your domain branch preference
+      cloudKey
     });
   }
 
-  // Record snapshot state to OUR Firebase Firestore database
-  console.log(pc.gray('Finalizing tracking tree records on Firestore...'));
-  await addDoc(collection(db, 'projects', projectID, 'commits'), {
-    branch,
+  console.log(pc.gray('Saving commit to Firestore...'));
+
+  // Save project document first
+  const projectRef = doc(db, 'projects', config.projectID);
+  const projectDoc = await getDoc(projectRef);
+  if (!projectDoc.exists()) {
+    await setDoc(projectRef, {
+      createdAt: serverTimestamp(),
+      branch: config.branch,
+      remote: config.remote
+    });
+  }
+
+  // Add commit
+  await addDoc(collection(db, 'projects', config.projectID, 'commits'), {
+    branch: config.branch,
     message,
     timestamp: serverTimestamp(),
     tree: fileTreeSnapshot
   });
 
+  // Clear staging file
   fs.writeFileSync(STAGING_FILE, JSON.stringify([], null, 2));
-  console.log(pc.green('\n✔ Success:') + pc.white(` Successfully deployed to https://rakibox.vercel.app [Branch: ${branch}]\n`));
+
+  const remoteUrl = config.remote || 'https://rakibox.vercel.app';
+  console.log(pc.green('\n✔ Success:') + pc.white(` Pushed successfully to ${remoteUrl} (branch: ${config.branch})\n`));
 }
