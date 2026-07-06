@@ -1,34 +1,11 @@
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, serverTimestamp, doc, setDoc, getDoc } from 'firebase/firestore';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { db } from '../lib/firebase.js';
+import { r2, BUCKET_NAME } from '../lib/r2.js';
+import { collection, addDoc, serverTimestamp, doc, setDoc, getDoc } from 'firebase/firestore';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs';
 import path from 'path';
 import mime from 'mime-types';
 import pc from 'picocolors';
-
-// Hardcoded Firebase and R2 credentials for all users
-const firebaseConfig = {
-  apiKey: "AIzaSyA-bIHIzJ22ZEVFDQ6uaOpvwtny_nHKtmw",
-  authDomain: "rakibox-72201.firebaseapp.com",
-  projectId: "rakibox-72201",
-  storageBucket: "rakibox-72201.firebasestorage.app",
-  messagingSenderId: "139647750665",
-  appId: "1:139647750665:web:981bc7fb927792584f9ed8",
-  measurementId: "G-XD2F2K903J"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-const BUCKET_NAME = "rakibox-72201.firebasestorage.app";
-const r2 = new S3Client({
-  region: "auto",
-  endpoint: "https://rakibox-72201.r2.cloudflarestorage.com",
-  credentials: {
-    accessKeyId: "AIzaSyA-bIHIzJ22ZEVFDQ6uaOpvwtny_nHKtmw",
-    secretAccessKey: "b0ac41c876342529d5ddaaed2f8fd643adfcb0a526a5ec171ac63421152d136a"
-  }
-});
 
 const DEFAULT_BRANCH = 'main';
 const STAGING_FILE = path.join(process.cwd(), '.rakibox-stage.json');

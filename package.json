@@ -1,6 +1,6 @@
 {
   "name": "rakibox",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Custom version control system using Firestore and Cloudflare R2",
   "type": "module",
   "main": "./dist/index.js",

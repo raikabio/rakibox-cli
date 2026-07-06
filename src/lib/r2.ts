@@ -1,17 +1,12 @@
 import { S3Client } from "@aws-sdk/client-s3";
-import dotenv from "dotenv";
-import path from "path";
-
-// Load configuration from local working directory environment files
-dotenv.config({ path: path.join(process.cwd(), '.env') });
 
 export const r2 = new S3Client({
   region: "auto",
-  endpoint: process.env.CLOUDFLARE_R2_ENDPOINT,
+  endpoint: "https://f96be84ba985f486f6c14f39115fcafc.r2.cloudflarestorage.com",
   credentials: {
-    accessKeyId: process.env.CLOUDFLARE_R2_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY || "",
+    accessKeyId: "95aa8be23809629532faa6fe71e1a3bd",
+    secretAccessKey: "b0ac41c876342529d5ddaaed2f8fd643adfcb0a526a5ec171ac63421152d136a",
   },
 });
 
-export const BUCKET_NAME = process.env.CLOUDFLARE_R2_BUCKET_NAME || "";
+export const BUCKET_NAME = "rakibox";
