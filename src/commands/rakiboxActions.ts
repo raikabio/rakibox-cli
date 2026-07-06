@@ -26,7 +26,7 @@ const r2 = new S3Client({
   endpoint: "https://rakibox-72201.r2.cloudflarestorage.com",
   credentials: {
     accessKeyId: "AIzaSyA-bIHIzJ22ZEVFDQ6uaOpvwtny_nHKtmw",
-    secretAccessKey: "YOUR_ACTUAL_R2_SECRET_KEY_HERE"
+    secretAccessKey: "b0ac41c876342529d5ddaaed2f8fd643adfcb0a526a5ec171ac63421152d136a"
   }
 });
 
