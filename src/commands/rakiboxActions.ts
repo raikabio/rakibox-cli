@@ -1,5 +1,5 @@
-import { db } from '../lib/firebase.js';
-import { r2, BUCKET_NAME } from '../lib/r2.js';
+import { db } from '../lib/firebase';
+import { r2, BUCKET_NAME } from '../lib/r2';
 import { collection, addDoc, serverTimestamp, doc, setDoc, getDoc } from 'firebase/firestore';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs';

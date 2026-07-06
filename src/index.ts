@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { initRakibox, addFiles, commit, setBranch, addRemote, pushRakibox } from './commands/rakiboxActions.js';
+import { initRakibox, addFiles, commit, setBranch, addRemote, pushRakibox } from './commands/rakiboxActions';
 
 const program = new Command();
 
