@@ -113,18 +113,26 @@ export function commit(message: string) {
   console.log(pc.green('✔ Success:') + pc.white(` Commit created with message: "${message}"`));
 }
 
-export function setBranch(branchName: string) {
+export function setBranch(...args: string[]) {
+  // Handle both "rakibox branch main" and "rakibox branch -M main"
+  const branchName = args.find(arg => !arg.startsWith("-")) || "main";
   const config = loadConfig();
   config.branch = branchName;
   saveConfig(config);
-  console.log(pc.green('✔ Success:') + pc.white(` Switched to branch: ${branchName}`));
+  console.log(pc.green("\u2714 Success:") + pc.white(` Switched to branch: ${branchName}`));
 }
 
-export function addRemote(url: string) {
+export function addRemote(...args: string[]) {
+  // Handle "rakibox remote add origin <url>" and "rakibox remote <url>"
+  const url = args.find(arg => !arg.startsWith("-") && arg !== "add" && arg !== "origin") || args[args.length - 1];
+  if (!url || url === "add" || url === "origin") {
+    console.error(pc.red("\u2716 Error:") + " Please provide a remote URL");
+    process.exit(1);
+  }
   const config = loadConfig();
   config.remote = url;
   saveConfig(config);
-  console.log(pc.green('✔ Success:') + pc.white(` Remote origin set to: ${url}`));
+  console.log(pc.green("\u2714 Success:") + pc.white(` Remote origin set to: ${url}`));
 }
 
 export async function pushRakibox(message: string = 'Cloud publish checkpoint update') {
@@ -143,57 +151,62 @@ export async function pushRakibox(message: string = 'Cloud publish checkpoint up
     return;
   }
 
-  const fileTreeSnapshot: Array<{ path: string; cloudUrl: string }> = [];
+  const fileTreeSnapshot: Array<{ path: string; cloudKey: string }> = [];
 
-  console.log(pc.gray('Uploading files to Cloudflare R2...'));
+  try {
+    console.log(pc.gray('Uploading files to Cloudflare R2...'));
 
-  for (const relativePath of stagedFiles) {
-    const fileAbsolutePath = path.resolve(process.cwd(), relativePath);
-    if (!fs.existsSync(fileAbsolutePath)) continue;
+    for (const relativePath of stagedFiles) {
+      const fileAbsolutePath = path.resolve(process.cwd(), relativePath);
+      if (!fs.existsSync(fileAbsolutePath)) continue;
 
-    const fileBuffer = fs.readFileSync(fileAbsolutePath);
-    const contentType = mime.lookup(fileAbsolutePath) || 'application/octet-stream';
-    const cleanPath = relativePath.replace(/\\/g, '/');
-    
-    const cloudKey = `projects/${config.projectID}/${config.branch}/${cleanPath}`;
+      const fileBuffer = fs.readFileSync(fileAbsolutePath);
+      const contentType = mime.lookup(fileAbsolutePath) || 'application/octet-stream';
+      const cleanPath = relativePath.replace(/\\/g, '/');
+      
+      const cloudKey = `projects/${config.projectID}/${config.branch}/${cleanPath}`;
 
-    await r2.send(new PutObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: cloudKey,
-      Body: fileBuffer,
-      ContentType: contentType
-    }));
+      await r2.send(new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: cloudKey,
+        Body: fileBuffer,
+        ContentType: contentType
+      }));
 
-    fileTreeSnapshot.push({
-      path: cleanPath,
-      cloudKey
-    });
-  }
+      fileTreeSnapshot.push({
+        path: cleanPath,
+        cloudKey
+      });
+    }
 
-  console.log(pc.gray('Saving commit to Firestore...'));
+    console.log(pc.gray('Saving commit to Firestore...'));
 
-  // Save project document first
-  const projectRef = doc(db, 'projects', config.projectID);
-  const projectDoc = await getDoc(projectRef);
-  if (!projectDoc.exists()) {
-    await setDoc(projectRef, {
-      createdAt: serverTimestamp(),
+    // Save project document first
+    const projectRef = doc(db, 'projects', config.projectID);
+    const projectDoc = await getDoc(projectRef);
+    if (!projectDoc.exists()) {
+      await setDoc(projectRef, {
+        createdAt: serverTimestamp(),
+        branch: config.branch,
+        remote: config.remote
+      });
+    }
+
+    // Add commit
+    await addDoc(collection(db, 'projects', config.projectID, 'commits'), {
       branch: config.branch,
-      remote: config.remote
+      message,
+      timestamp: serverTimestamp(),
+      tree: fileTreeSnapshot
     });
+
+    // Clear staging file
+    fs.writeFileSync(STAGING_FILE, JSON.stringify([], null, 2));
+
+    const remoteUrl = config.remote || 'https://rakibox.vercel.app';
+    console.log(pc.green('\n✔ Success:') + pc.white(` Pushed successfully to ${remoteUrl} (branch: ${config.branch})\n`));
+  } catch (err) {
+    console.error(pc.red('\n✖ Error pushing to Rakibox Cloud:'));
+    console.error(pc.white(`  ${err instanceof Error ? err.message : String(err)}`));
   }
-
-  // Add commit
-  await addDoc(collection(db, 'projects', config.projectID, 'commits'), {
-    branch: config.branch,
-    message,
-    timestamp: serverTimestamp(),
-    tree: fileTreeSnapshot
-  });
-
-  // Clear staging file
-  fs.writeFileSync(STAGING_FILE, JSON.stringify([], null, 2));
-
-  const remoteUrl = config.remote || 'https://rakibox.vercel.app';
-  console.log(pc.green('\n✔ Success:') + pc.white(` Pushed successfully to ${remoteUrl} (branch: ${config.branch})\n`));
 }

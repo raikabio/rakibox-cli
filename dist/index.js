@@ -12,8 +12,8 @@ program
 program
     .command('add')
     .description('Stage files')
-    .argument('[paths]', 'Files or directories to stage', '.')
-    .action((paths) => addFiles(paths));
+    .argument('[paths...]', 'Files or directories to stage', ['.'])
+    .action((paths) => addFiles(paths.join(' ')));
 program
     .command('commit')
     .description('Commit staged changes')
@@ -22,13 +22,13 @@ program
 program
     .command('branch')
     .description('Set branch name')
-    .argument('<name>', 'Branch name')
-    .action((name) => setBranch(name));
+    .argument('[args...]', 'Branch arguments (name or -M name)')
+    .action((args) => setBranch(...args));
 program
     .command('remote')
     .description('Add remote URL')
-    .argument('url', 'Remote repository URL')
-    .action((url) => addRemote(url));
+    .argument('[args...]', 'Remote arguments (add origin <url> or just <url>)')
+    .action((args) => addRemote(...args));
 program
     .command('push')
     .description('Push changes to Rakibox Cloud')
