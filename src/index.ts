@@ -28,8 +28,12 @@ program
 program
   .command('branch')
   .description('Set branch name')
+  .allowUnknownOption()
   .argument('[args...]', 'Branch arguments (name or -M name)')
-  .action((args) => setBranch(...args));
+  .action((args, options) => {
+    const allArgs = process.argv.slice(process.argv.indexOf('branch') + 1);
+    setBranch(...allArgs);
+  });
 
 program
   .command('remote')
@@ -40,7 +44,13 @@ program
 program
   .command('push')
   .description('Push changes to Rakibox Cloud')
-  .argument('[message]', 'Commit message', 'Cloud publish checkpoint update')
-  .action(async (message) => await pushRakibox(message));
+  .allowUnknownOption()
+  .argument('[args...]', 'Push arguments (message, -u origin main, etc.)')
+  .action(async (args) => {
+    const allArgs = process.argv.slice(process.argv.indexOf('push') + 1);
+    // Find the message (any argument not starting with -)
+    const message = allArgs.find(a => !a.startsWith('-')) || 'Cloud publish checkpoint update';
+    await pushRakibox(message);
+  });
 
 program.parse(process.argv);
