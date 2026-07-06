@@ -141,18 +141,19 @@ export async function pushRakibox(message: string = 'Cloud publish checkpoint up
       const contentType = mime.lookup(fileAbsolutePath) || 'application/octet-stream';
       const cleanPath = relativePath.replace(/\\/g, '/');
       
-      const cloudKey = `projects/${config.projectID}/${config.branch}/${cleanPath}`;
+      const r2Path = `${config.projectID}/${config.branch}/${cleanPath}`;
+      const publicUrl = `https://pub-904a6a35d4aa484093d0c9d6f913308b.r2.dev/${r2Path}`;
 
       await r2.send(new PutObjectCommand({
         Bucket: BUCKET_NAME,
-        Key: cloudKey,
+        Key: r2Path,
         Body: fileBuffer,
         ContentType: contentType
       }));
 
       fileTreeSnapshot.push({
         path: cleanPath,
-        cloudKey
+        url: publicUrl
       });
     }
 
