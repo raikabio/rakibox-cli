@@ -1,6 +1,6 @@
 import { db } from '../lib/firebase';
 import { r2, BUCKET_NAME } from '../lib/r2';
-import { collection, addDoc, serverTimestamp, doc, setDoc, getDoc } from 'firebase/firestore';
+import { ref, set, push, get, update, serverTimestamp } from 'firebase/database';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs';
 import path from 'path';
@@ -15,10 +15,10 @@ function getAllFiles(dirPath: string, arrayOfFiles: string[] = []): string[] {
   const files = fs.readdirSync(dirPath);
   files.forEach((file) => {
     if ([
-      'node_modules', '.git', '.rakibox-stage.json', '.rakibox.json', 
+      'node_modules', '.git', '.rakibox-stage.json', '.rakibox.json',
       'dist', '.env', '.npmrc'
     ].includes(file)) return;
-    
+
     const absolutePath = path.join(dirPath, file);
     if (fs.statSync(absolutePath).isDirectory()) {
       getAllFiles(absolutePath, arrayOfFiles);
@@ -41,9 +41,36 @@ function saveConfig(config: any) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
+/**
+ * Parse a rakibox remote URL and extract owner + repoName (without .raki suffix).
+ * Handles: https://rakibox.vercel.app/owner/repo.raki
+ *          https://rakibox.vercel.app/owner/repo
+ */
+function parseRemoteUrl(url: string): { owner: string; repoName: string } | null {
+  try {
+    const u = new URL(url);
+    const parts = u.pathname.replace(/^\//, '').split('/');
+    if (parts.length < 2) return null;
+    const owner = parts[0];
+    const repoName = parts[1].replace(/\.raki$/, '');
+    if (!owner || !repoName) return null;
+    return { owner, repoName };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sanitize a string to be a safe RTDB key (no . # $ [ ] /).
+ * We replace '.' with '_dot_' and '/' with '_'.
+ */
+function safeKey(str: string): string {
+  return str.replace(/\./g, '_dot_').replace(/\//g, '_').replace(/[#$\[\]]/g, '-');
+}
+
 export async function initRakibox() {
   console.log(pc.gray('\nInitializing Rakibox workspace...'));
-  
+
   if (fs.existsSync(CONFIG_FILE)) {
     console.log(pc.yellow('⚠ Notice:') + ' Rakibox repository is already active here.');
     return;
@@ -59,8 +86,8 @@ export async function initRakibox() {
 
 export function addFiles(paths: string = '.') {
   console.log(pc.gray('\nStaging files...'));
-  
-  const config = loadConfig();
+
+  loadConfig(); // validate init
   let filesToStage: string[] = [];
 
   if (paths === '.') {
@@ -85,36 +112,35 @@ export function addFiles(paths: string = '.') {
 
 export function commit(message: string) {
   console.log(pc.gray(`\nCommitting changes...`));
-  
-  const config = loadConfig();
+  loadConfig(); // validate init
   console.log(pc.green('✔ Success:') + pc.white(` Commit created with message: "${message}"`));
 }
 
 export function setBranch(...args: string[]) {
   // Handle both "rakibox branch main" and "rakibox branch -M main"
-  const branchName = args.find(arg => !arg.startsWith("-")) || "main";
+  const branchName = args.find(arg => !arg.startsWith('-')) || 'main';
   const config = loadConfig();
   config.branch = branchName;
   saveConfig(config);
-  console.log(pc.green("\u2714 Success:") + pc.white(` Switched to branch: ${branchName}`));
+  console.log(pc.green('✔ Success:') + pc.white(` Switched to branch: ${branchName}`));
 }
 
 export function addRemote(...args: string[]) {
   // Handle "rakibox remote add origin <url>" and "rakibox remote <url>"
-  const url = args.find(arg => !arg.startsWith("-") && arg !== "add" && arg !== "origin") || args[args.length - 1];
-  if (!url || url === "add" || url === "origin") {
-    console.error(pc.red("\u2716 Error:") + " Please provide a remote URL");
+  const url = args.find(arg => !arg.startsWith('-') && arg !== 'add' && arg !== 'origin') || args[args.length - 1];
+  if (!url || url === 'add' || url === 'origin') {
+    console.error(pc.red('✖ Error:') + ' Please provide a remote URL');
     process.exit(1);
   }
   const config = loadConfig();
   config.remote = url;
   saveConfig(config);
-  console.log(pc.green("\u2714 Success:") + pc.white(` Remote origin set to: ${url}`));
+  console.log(pc.green('✔ Success:') + pc.white(` Remote origin set to: ${url}`));
 }
 
 export async function pushRakibox(message: string = 'Cloud publish checkpoint update') {
   console.log(pc.gray('\nPushing to Rakibox Cloud...'));
-  
+
   if (!fs.existsSync(STAGING_FILE) || !fs.existsSync(CONFIG_FILE)) {
     console.error(pc.red('✖ Error:') + ' Project not initialized or no files staged.');
     return;
@@ -128,7 +154,7 @@ export async function pushRakibox(message: string = 'Cloud publish checkpoint up
     return;
   }
 
-  const fileTreeSnapshot: Array<{ path: string; cloudKey: string }> = [];
+  const fileTreeSnapshot: Array<{ path: string; url: string }> = [];
 
   try {
     console.log(pc.gray('Uploading files to Cloudflare R2...'));
@@ -140,7 +166,7 @@ export async function pushRakibox(message: string = 'Cloud publish checkpoint up
       const fileBuffer = fs.readFileSync(fileAbsolutePath);
       const contentType = mime.lookup(fileAbsolutePath) || 'application/octet-stream';
       const cleanPath = relativePath.replace(/\\/g, '/');
-      
+
       const r2Path = `${config.projectID}/${config.branch}/${cleanPath}`;
       const publicUrl = `https://pub-904a6a35d4aa484093d0c9d6f913308b.r2.dev/${r2Path}`;
 
@@ -151,38 +177,66 @@ export async function pushRakibox(message: string = 'Cloud publish checkpoint up
         ContentType: contentType
       }));
 
-      fileTreeSnapshot.push({
-        path: cleanPath,
-        url: publicUrl
-      });
+      fileTreeSnapshot.push({ path: cleanPath, url: publicUrl });
     }
 
-    console.log(pc.gray('Saving commit to Firestore...'));
+    console.log(pc.gray('Saving commit to Realtime Database...'));
 
-    // Save project document first
-    const projectRef = doc(db, 'projects', config.projectID);
-    const projectDoc = await getDoc(projectRef);
-    if (!projectDoc.exists()) {
-      await setDoc(projectRef, {
+    // ── Internal project log ──────────────────────────────────────────────
+    // Check if project node exists; if not, create it
+    const projectSnap = await get(ref(db, `projects/${config.projectID}`));
+    if (!projectSnap.exists()) {
+      await set(ref(db, `projects/${config.projectID}`), {
         createdAt: serverTimestamp(),
         branch: config.branch,
-        remote: config.remote
+        remote: config.remote ?? null
       });
     }
 
-    // Add commit
-    await addDoc(collection(db, 'projects', config.projectID, 'commits'), {
+    // Push commit entry under projects/{projectID}/commits
+    await push(ref(db, `projects/${config.projectID}/commits`), {
       branch: config.branch,
       message,
       timestamp: serverTimestamp(),
       tree: fileTreeSnapshot
     });
 
+    // ── Sync to canonical repo doc ────────────────────────────────────────
+    // The web RepoPage listens to: /repos/{owner}_{repoName}
+    // We write the latest file tree here so the UI updates live.
+    const remoteUrl = config.remote ?? '';
+    const parsed = remoteUrl ? parseRemoteUrl(remoteUrl) : null;
+
+    if (parsed) {
+      const { owner, repoName } = parsed;
+      // RTDB keys must not contain . # $ [ ] /
+      const repoKey = `${safeKey(owner)}_${safeKey(repoName)}`;
+
+      await update(ref(db, `repos/${repoKey}`), {
+        latestTree: fileTreeSnapshot,
+        latestCommit: { message, branch: config.branch },
+        lastPushedAt: serverTimestamp(),
+        projectID: config.projectID,
+        // Upsert base fields so the page works for CLI-first repos
+        name: repoName,
+        ownerUsername: owner,
+        platform: 'rakibox',
+      });
+
+      console.log(pc.gray(`Synced file tree to RTDB → repos/${repoKey}`));
+    } else {
+      console.log(
+        pc.yellow('⚠ Notice:') +
+        pc.white(' No valid remote URL set. Run: rakibox remote add origin https://rakibox.vercel.app/<owner>/<repo>.raki')
+      );
+    }
+
     // Clear staging file
     fs.writeFileSync(STAGING_FILE, JSON.stringify([], null, 2));
 
-    const remoteUrl = config.remote || 'https://rakibox.vercel.app';
-    console.log(pc.green('\n✔ Success:') + pc.white(` Pushed successfully to ${remoteUrl} (branch: ${config.branch})\n`));
+    const displayUrl = remoteUrl || 'https://rakibox.vercel.app';
+    console.log(pc.green('\n✔ Success:') + pc.white(` Pushed to ${displayUrl} (branch: ${config.branch})\n`));
+
   } catch (err) {
     console.error(pc.red('\n✖ Error pushing to Rakibox Cloud:'));
     console.error(pc.white(`  ${err instanceof Error ? err.message : String(err)}`));
